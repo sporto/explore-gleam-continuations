@@ -1,6 +1,7 @@
 import gleam/io
 import gleam/list
 import gleam/result
+import lib.{type Program, Call, Done, Failed, execute}
 
 type Account {
   Account(id: String)
@@ -11,16 +12,13 @@ type User {
 }
 
 // arguments it takes, function it expects as next
-type Effect(a, err) {
-  FetchAccounts(Nil, fn(List(Account)) -> Program(a, err, Effect(a, err)))
-  FetchUsers(Nil, fn(List(User)) -> Program(a, err, Effect(a, err)))
-  SaveAccount(Account, fn(Nil) -> Program(a, err, Effect(a, err)))
-}
-
-type Program(a, err, deps) {
-  Call(Effect(a, err))
-  Failed(err)
-  Done(a)
+type Dependency(a, err) {
+  FetchAccounts(
+    String,
+    fn(List(Account)) -> Program(a, err, Dependency(a, err)),
+  )
+  FetchUsers(Nil, fn(List(User)) -> Program(a, err, Dependency(a, err)))
+  SaveAccount(Account, fn(Nil) -> Program(a, err, Dependency(a, err)))
 }
 
 fn try(result: Result(a, err), next) {
@@ -30,9 +28,9 @@ fn try(result: Result(a, err), next) {
   }
 }
 
-fn program_account() -> Program(Account, String, Effect(Account, String)) {
+fn program_account() -> Program(Account, String, Dependency(Account, String)) {
   Call(
-    FetchAccounts(Nil, fn(accounts) {
+    FetchAccounts("1", fn(accounts) {
       use first <- try(
         list.first(accounts) |> result.replace_error("First account not found"),
       )
@@ -42,7 +40,7 @@ fn program_account() -> Program(Account, String, Effect(Account, String)) {
   )
 }
 
-// fn program_user() -> Program(User, String, Effect(User)) {
+// fn program_user() -> Program(User, String, Dependency(User)) {
 //   use users <- Call(FetchUsers(Nil))
 
 //   use first <- try(
@@ -52,31 +50,24 @@ fn program_account() -> Program(Account, String, Effect(Account, String)) {
 //   Done(first)
 // }
 
-fn execute_effect(effect: Effect(a, err)) -> Result(a, err) {
+fn execute_effect(
+  effect: Dependency(a, err),
+) -> Program(a, err, Dependency(a, err)) {
   case effect {
-    FetchAccounts(_, next) -> {
-      execute_fetch_accounts_real(next) |> execute
+    FetchAccounts(client_id, next) -> {
+      execute_fetch_accounts_real(client_id, next)
     }
     FetchUsers(_, next) -> {
       execute_fetch_users_real(next)
-      |> execute
     }
     SaveAccount(_account, next) -> {
       // Save the account
-      next(Nil) |> execute
+      next(Nil)
     }
   }
 }
 
-fn execute(program: Program(a, err, Effect(a, err))) -> Result(a, err) {
-  case program {
-    Call(effect) -> execute_effect(effect)
-    Done(a) -> Ok(a)
-    Failed(e) -> Error(e)
-  }
-}
-
-fn execute_fetch_accounts_real(next) {
+fn execute_fetch_accounts_real(client_id, next) {
   next([Account("r1"), Account("r2")])
 }
 
@@ -85,7 +76,7 @@ fn execute_fetch_users_real(next) {
 }
 
 pub fn main() {
-  let account = program_account() |> execute
+  let account = program_account() |> execute(execute_effect)
   io.debug(account)
 
   // let user = execute(program_user())
