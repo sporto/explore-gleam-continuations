@@ -1,7 +1,7 @@
 pub type Program(a, err, deps) {
-  Call(deps)
-  Failed(err)
   Done(a)
+  Failed(err)
+  Yield(deps)
 }
 
 // type Effect(a, err) =
@@ -12,8 +12,13 @@ pub fn execute(
   execute_dependency: fn(deps) -> Program(a, err, deps),
 ) -> Result(a, err) {
   case program {
-    Call(effect) -> execute_dependency(effect) |> execute(execute_dependency)
     Done(a) -> Ok(a)
     Failed(e) -> Error(e)
+    Yield(effect) -> execute_dependency(effect) |> execute(execute_dependency)
   }
+}
+
+// fn(fn(List(Account)) -> Program(a, b, Dependency(a, b))) -> Dependency(a, b)
+pub fn yield(effect, rest) {
+  Yield(effect(rest))
 }
