@@ -1,7 +1,7 @@
 import gleam/io
 import gleam/list
 import gleam/result
-import lib.{type Program, Done, Failed, execute, yield}
+import lib.{type Program, continue_if_ok, done, execute, yield}
 
 type Account {
   Account(id: String)
@@ -11,56 +11,16 @@ type User {
   User(id: String)
 }
 
-// arguments it takes, function it expects as next
-type DependencyAccount {
-  FetchAccounts(
-    String,
-    fn(List(Account)) -> Program(Account, String, DependencyAccount),
-  )
-  SaveAccount(Account, fn(Nil) -> Program(Account, String, DependencyAccount))
+type AccountProgram =
+  Program(Account, String, AccountDependency)
+
+type AccountDependency {
+  FetchAccounts(String, fn(Result(List(Account), String)) -> AccountProgram)
+  SaveAccount(Account, fn(Nil) -> AccountProgram)
 }
 
-// type Dependency(a, err) {
-//   FetchAccounts(
-//     String,
-//     fn(List(Account)) -> Program(a, err, Dependency(a, err)),
-//   )
-//   FetchUsers(Nil, fn(List(User)) -> Program(a, err, Dependency(a, err)))
-//   SaveAccount(Account, fn(Nil) -> Program(a, err, Dependency(a, err)))
-// }
-
-fn try(result: Result(a, err), next) {
-  case result {
-    Ok(a) -> next(a)
-    Error(e) -> Failed(e)
-  }
-}
-
-fn program_account() -> Program(Account, String, DependencyAccount) {
-  let fetch = FetchAccounts("1", _)
-  use accounts <- yield(fetch)
-
-  use first <- try(
-    list.first(accounts) |> result.replace_error("First account not found"),
-  )
-
-  Done(first)
-}
-
-// fn program_user() -> Program(User, String, Dependency(User)) {
-//   use users <- Yield(FetchUsers(Nil))
-
-//   use first <- try(
-//     list.first(users) |> result.replace_error("First user not found"),
-//   )
-
-//   Done(first)
-// }
-
-fn execute_effect(
-  effect: DependencyAccount,
-) -> Program(Account, String, DependencyAccount) {
-  case effect {
+fn account_dependency_execute(dependency: AccountDependency) -> AccountProgram {
+  case dependency {
     FetchAccounts(client_id, next) -> {
       execute_fetch_accounts_real(client_id) |> next
     }
@@ -71,19 +31,54 @@ fn execute_effect(
 }
 
 fn execute_fetch_accounts_real(client_id) {
-  [Account("r1"), Account("r2")]
+  Ok([Account("r1"), Account("r2")])
 }
 
-fn execute_fetch_users_real() {
-  [User("r1"), User("r2")]
+fn account_program() -> AccountProgram {
+  let fetch = FetchAccounts("1", _)
+  use accounts_result <- yield(fetch)
+
+  use accounts <- continue_if_ok(accounts_result)
+
+  use first <- continue_if_ok(
+    list.first(accounts) |> result.replace_error("First account not found"),
+  )
+
+  done(first)
+}
+
+type UserProgram =
+  Program(User, String, UserDependency)
+
+type UserDependency {
+  FetchUser(String, fn(Result(User, String)) -> UserProgram)
+}
+
+fn user_dependency_execute(dependency: UserDependency) -> UserProgram {
+  case dependency {
+    FetchUser(user_id, next) -> {
+      execute_fetch_user_real(user_id) |> next
+    }
+  }
+}
+
+fn execute_fetch_user_real(user_id: String) -> Result(User, String) {
+  Error("User not found")
+}
+
+fn user_program() -> Program(User, String, UserDependency) {
+  use user_result <- yield(FetchUser("1", _))
+  use user <- continue_if_ok(user_result)
+
+  done(user)
 }
 
 pub fn main() {
-  let account = program_account() |> execute(execute_effect)
+  let account = account_program() |> execute(account_dependency_execute)
   io.debug(account)
 
-  // let user = execute(program_user())
-  // io.debug(user)
+  let user = user_program() |> execute(user_dependency_execute)
+  io.debug(user)
 
   io.println("Done")
 }
