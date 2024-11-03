@@ -1,84 +1,32 @@
-import gleam/io
-import gleam/list
-import gleam/result
-import lib.{type Program, continue_if_ok, done, execute, yield}
-
-type Account {
-  Account(id: String)
+pub type Program(a, err, deps) {
+  Done(a)
+  Failed(err)
+  Yield(deps)
 }
 
-type User {
-  User(id: String)
-}
-
-type AccountProgram =
-  Program(Account, String, AccountDependency)
-
-type AccountDependency {
-  FetchAccounts(String, fn(Result(List(Account), String)) -> AccountProgram)
-  SaveAccount(Account, fn(Nil) -> AccountProgram)
-}
-
-fn account_dependency_execute(dependency: AccountDependency) -> AccountProgram {
-  case dependency {
-    FetchAccounts(client_id, next) -> {
-      execute_fetch_accounts_real(client_id) |> next
-    }
-    SaveAccount(_account, next) -> {
-      Nil |> next
-    }
+pub fn execute(
+  program: Program(a, err, deps),
+  execute_dependency: fn(deps) -> Program(a, err, deps),
+) -> Result(a, err) {
+  case program {
+    Done(a) -> Ok(a)
+    Failed(e) -> Error(e)
+    Yield(effect) -> execute_dependency(effect) |> execute(execute_dependency)
   }
 }
 
-fn execute_fetch_accounts_real(client_id) {
-  Ok([Account("r1"), Account("r2")])
-}
-
-fn account_program() -> AccountProgram {
-  let fetch = FetchAccounts("1", _)
-  use accounts_result <- yield(fetch)
-
-  use accounts <- continue_if_ok(accounts_result)
-
-  use first <- continue_if_ok(
-    list.first(accounts) |> result.replace_error("First account not found"),
-  )
-
-  done(first)
-}
-
-type UserProgram =
-  Program(User, String, UserDependency)
-
-type UserDependency {
-  FetchUser(String, fn(Result(User, String)) -> UserProgram)
-}
-
-fn user_dependency_execute(dependency: UserDependency) -> UserProgram {
-  case dependency {
-    FetchUser(user_id, next) -> {
-      execute_fetch_user_real(user_id) |> next
-    }
+pub fn continue_if_ok(result: Result(a, err), next) {
+  case result {
+    Ok(a) -> next(a)
+    Error(e) -> Failed(e)
   }
 }
 
-fn execute_fetch_user_real(user_id: String) -> Result(User, String) {
-  Error("User not found")
+pub fn done(a) {
+  Done(a)
 }
 
-fn user_program() -> Program(User, String, UserDependency) {
-  use user_result <- yield(FetchUser("1", _))
-  use user <- continue_if_ok(user_result)
-
-  done(user)
-}
-
-pub fn main() {
-  let account = account_program() |> execute(account_dependency_execute)
-  io.debug(account)
-
-  let user = user_program() |> execute(user_dependency_execute)
-  io.debug(user)
-
-  io.println("Done")
+// fn(fn(List(Account)) -> Program(a, b, Dependency(a, b))) -> Dependency(a, b)
+pub fn yield(effect, rest) {
+  Yield(effect(rest))
 }
